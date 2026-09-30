@@ -2,14 +2,21 @@
 import os
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 import auth
 
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score, accuracy_score
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import (
+    mean_absolute_error,
+    r2_score,
+    accuracy_score,
+)
 
 
 # ---------------------------------------------------------
@@ -24,6 +31,7 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "student_performance.csv"
+MODEL_PATH = BASE_DIR / "models" / "student_model.joblib"
 
 FEATURES = [
     "attendance_percent",
@@ -34,6 +42,7 @@ FEATURES = [
     "class_participation",
     "sleep_hours",
 ]
+
 TARGET = "final_score"
 
 
@@ -138,6 +147,7 @@ p, label, .stMarkdown {
     font-size: clamp(1.5rem, 3vw, 2.1rem);
     font-weight: 700;
     line-height: 1.2;
+    overflow-wrap: anywhere;
 }
 
 .metric-note {
@@ -328,13 +338,10 @@ def home_page():
 # ---------------------------------------------------------
 # LOGIN + SIGNUP PAGE
 # ---------------------------------------------------------
-
 def login_page():
-    # Initialize login/signup view
     if "auth_view" not in st.session_state:
         st.session_state.auth_view = "login"
 
-    # Center the authentication form
     _, center, _ = st.columns([1, 1.15, 1])
 
     with center:
@@ -346,7 +353,6 @@ def login_page():
         st.title("Welcome to EduPredict AI")
         st.write("Sign in or create your student analytics account.")
 
-        # Switch between login and registration
         view = st.radio(
             "Account",
             ["Sign in", "Create account"],
@@ -361,13 +367,10 @@ def login_page():
             "login" if view == "Sign in" else "signup"
         )
 
-        # Show registration success once
         if "signup_success" in st.session_state:
             st.success(st.session_state.pop("signup_success"))
 
-        # -----------------------------------------
         # SIGN IN
-        # -----------------------------------------
         if st.session_state.auth_view == "login":
             st.subheader("Sign in")
 
@@ -414,13 +417,9 @@ def login_page():
             st.caption(
                 "Forgot your password? Email recovery is not set up yet."
             )
-
-            st.write("")
             st.write("Don't have an account? Select Create account above.")
 
-        # -----------------------------------------
         # CREATE ACCOUNT
-        # -----------------------------------------
         else:
             st.subheader("Create your account")
 
@@ -459,7 +458,6 @@ def login_page():
                 )
 
             if submitted:
-                # Validate required fields
                 if not all([
                     full_name.strip(),
                     email.strip(),
@@ -469,7 +467,10 @@ def login_page():
                 ]):
                     st.error("Please fill in all fields.")
 
-                elif "@" not in email or "." not in email.split("@")[-1]:
+                elif (
+                    "@" not in email
+                    or "." not in email.split("@")[-1]
+                ):
                     st.error("Please enter a valid email address.")
 
                 elif len(username.strip()) < 3:
@@ -503,17 +504,14 @@ def login_page():
                     else:
                         st.error(message)
 
-    # -----------------------------------------
-    # BACK TO HOME
-    # -----------------------------------------
     st.write("")
-
     if st.button("← Back to home"):
         st.session_state.auth_view = "login"
         go("Home")
 
+
 # ---------------------------------------------------------
-# DATA + MODEL
+# DATA
 # ---------------------------------------------------------
 @st.cache_data
 def load_data():
@@ -523,24 +521,44 @@ def load_data():
     df = pd.read_csv(DATA_PATH)
     df.columns = df.columns.str.strip()
 
-    missing = [c for c in FEATURES + [TARGET] if c not in df.columns]
+    missing = [
+        col for col in FEATURES + [TARGET]
+        if col not in df.columns
+    ]
+
     if missing:
         raise ValueError(
-            "CSV is missing required columns: " + ", ".join(missing)
+            "CSV is missing required columns: "
+            + ", ".join(missing)
         )
 
     for col in FEATURES + [TARGET]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df = df.dropna(subset=FEATURES + [TARGET]).copy()
+    # Keep feature gaps for the model's median imputer.
+    # Rows without a target cannot be used for training/evaluation.
+    df = df.dropna(subset=[TARGET]).copy()
+
     return df
 
 
+# ---------------------------------------------------------
+# LOAD SAVED MODEL + EVALUATE
+# ---------------------------------------------------------
 @st.cache_resource
-def train_models(data):
+def train_models(data, model_version):
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            "Saved model not found. Run `python train.py` first."
+        )
+
+    # Load the pipeline saved by train.py
+    reg = joblib.load(MODEL_PATH)
+
     X = data[FEATURES]
     y = data[TARGET]
 
+    # Same held-out split settings as train.py
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -548,17 +566,11 @@ def train_models(data):
         random_state=42,
     )
 
-    reg = RandomForestRegressor(
-        n_estimators=150,
-        random_state=42,
-        min_samples_leaf=2,
-    )
-    reg.fit(X_train, y_train)
-
     predicted = reg.predict(X_test)
     mae = mean_absolute_error(y_test, predicted)
     r2 = r2_score(y_test, predicted)
 
+    # Optional classifier for result labels
     clf = None
     accuracy = None
 
@@ -574,25 +586,37 @@ def train_models(data):
                 yc if yc.value_counts().min() >= 2 else None
             )
 
-            Xc_train, Xc_test, yc_train, yc_test = train_test_split(
-                Xc,
-                yc,
-                test_size=0.2,
-                random_state=42,
-                stratify=stratify_labels,
-            )
+            try:
+                Xc_train, Xc_test, yc_train, yc_test = train_test_split(
+                    Xc,
+                    yc,
+                    test_size=0.2,
+                    random_state=42,
+                    stratify=stratify_labels,
+                )
 
-            clf = RandomForestClassifier(
-                n_estimators=150,
-                random_state=42,
-                min_samples_leaf=2,
-                class_weight="balanced",
-            )
-            clf.fit(Xc_train, yc_train)
-            accuracy = accuracy_score(
-                yc_test,
-                clf.predict(Xc_test),
-            )
+                clf = Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    (
+                        "classifier",
+                        RandomForestClassifier(
+                            n_estimators=150,
+                            random_state=42,
+                            min_samples_leaf=2,
+                            class_weight="balanced",
+                        ),
+                    ),
+                ])
+
+                clf.fit(Xc_train, yc_train)
+                accuracy = accuracy_score(
+                    yc_test,
+                    clf.predict(Xc_test),
+                )
+
+            except ValueError:
+                clf = None
+                accuracy = None
 
     return reg, clf, mae, r2, accuracy
 
@@ -614,6 +638,7 @@ def sidebar():
         """, unsafe_allow_html=True)
 
         st.caption("WORKSPACE")
+
         pages = [
             "Overview",
             "Predict student",
@@ -622,6 +647,7 @@ def sidebar():
         ]
 
         current = st.session_state.page
+
         selected = st.radio(
             "Navigation",
             pages,
@@ -637,7 +663,12 @@ def sidebar():
         st.caption("ACCOUNT")
 
         user = st.session_state.current_user or {}
-        display_name = user.get("full_name") or user.get("username") or "User"
+        display_name = (
+            user.get("full_name")
+            or user.get("username")
+            or "User"
+        )
+
         st.write(f"👤 {display_name}")
 
         if st.button("Log out", use_container_width=True):
@@ -651,7 +682,7 @@ def sidebar():
 # ---------------------------------------------------------
 # OVERVIEW PAGE
 # ---------------------------------------------------------
-def overview_page(df, mae):
+def overview_page(df, mae, r2):
     top_heading(
         "WORKSPACE / OVERVIEW",
         "Performance overview",
@@ -673,16 +704,32 @@ def overview_page(df, mae):
 
     with c1:
         metric_card("ESTIMATED SCORE", f"{score:.1f}/100", note)
+
     with c2:
         metric_card(
             "ESTIMATED OUTCOME",
             outcome,
             "Based on latest input" if latest else "Dataset snapshot",
         )
+
     with c3:
-        metric_card("STUDENTS IN DATA", f"{len(df):,}", "Usable sample records")
+        metric_card(
+            "STUDENTS IN DATA",
+            f"{len(df):,}",
+            "Usable sample records",
+        )
+
     with c4:
-        metric_card("MODEL MAE", f"{mae:.2f}", "Test-set score points")
+        metric_card(
+            "MODEL MAE",
+            f"{mae:.2f}",
+            "Test-set score points",
+        )
+
+    st.caption(
+        f"Regression test R²: {r2:.3f}. "
+        "Metrics are calculated on a held-out test split."
+    )
 
     st.write("")
     left, right = st.columns([1.4, 1], gap="large")
@@ -690,7 +737,10 @@ def overview_page(df, mae):
     with left:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.subheader("Score distribution")
-        st.caption("How final scores are distributed in the sample data.")
+        st.caption(
+            "How final scores are distributed in the sample data."
+        )
+
         st.bar_chart(
             df[TARGET].round(-1).value_counts().sort_index(),
             use_container_width=True,
@@ -723,6 +773,7 @@ def overview_page(df, mae):
 
     st.write("")
     st.subheader("Recent sample records")
+
     display_cols = FEATURES + [TARGET]
     st.dataframe(
         df[display_cols].head(8),
@@ -751,20 +802,29 @@ def predict_page(reg, clf):
         c1, c2 = st.columns(2)
 
         with c1:
-            attendance = st.slider("Attendance (%)", 0, 100, 80)
-            study = st.slider("Study hours per day", 0.0, 16.0, 3.0, 0.5)
-            assignment = st.slider("Assignment score (%)", 0, 100, 75)
+            attendance = st.slider(
+                "Attendance (%)", 0, 100, 80
+            )
+            study = st.slider(
+                "Study hours per day", 0.0, 16.0, 3.0, 0.5
+            )
+            assignment = st.slider(
+                "Assignment score (%)", 0, 100, 75
+            )
             participation = st.slider(
-                "Class participation (1–5)",
-                1,
-                5,
-                3,
+                "Class participation (1–5)", 1, 5, 3
             )
 
         with c2:
-            exam1 = st.slider("Internal exam 1 (%)", 0, 100, 70)
-            exam2 = st.slider("Internal exam 2 (%)", 0, 100, 72)
-            sleep = st.slider("Sleep hours per night", 0.0, 16.0, 8.0, 0.5)
+            exam1 = st.slider(
+                "Internal exam 1 (%)", 0, 100, 70
+            )
+            exam2 = st.slider(
+                "Internal exam 2 (%)", 0, 100, 72
+            )
+            sleep = st.slider(
+                "Sleep hours per night", 0.0, 16.0, 8.0, 0.5
+            )
 
         submitted = st.form_submit_button(
             "Generate prediction",
@@ -787,12 +847,15 @@ def predict_page(reg, clf):
 
         if clf is not None:
             outcome = str(clf.predict(row)[0])
+            outcome_note = "Classifier estimate"
         else:
             outcome = "Pass" if score >= 50 else "Fail"
+            outcome_note = "Estimated using a 50-point threshold"
 
         st.session_state.last_prediction = {
             "score": score,
             "outcome": outcome,
+            "outcome_note": outcome_note,
             "inputs": row.iloc[0].to_dict(),
         }
 
@@ -814,7 +877,7 @@ def predict_page(reg, clf):
             metric_card(
                 "ESTIMATED OUTCOME",
                 latest["outcome"],
-                "Model classification / score threshold",
+                latest["outcome_note"],
             )
 
         st.progress(int(round(latest["score"])))
@@ -829,6 +892,7 @@ def predict_page(reg, clf):
             use_container_width=True,
             hide_index=True,
         )
+
     else:
         st.markdown(
             '<div class="panel">Your prediction will appear here after '
@@ -859,6 +923,7 @@ def insights_page(df):
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.subheader("Input vs final score")
         st.caption("Each point is a sample record.")
+
         st.scatter_chart(
             df,
             x=selected,
@@ -880,16 +945,20 @@ def insights_page(df):
         ]:
             bins = [0, 50, 60, 70, 80, 90, 101]
             temp = df.copy()
+
             temp["group"] = pd.cut(
                 temp[selected],
                 bins=bins,
                 include_lowest=True,
             )
+
             means = temp.groupby(
                 "group",
                 observed=False,
             )[TARGET].mean().dropna()
+
             means.index = means.index.astype(str)
+
         else:
             means = df.groupby(selected)[TARGET].mean().sort_index()
 
@@ -899,7 +968,10 @@ def insights_page(df):
     st.write("")
     st.subheader("Correlation with final score")
 
-    corr = df[FEATURES + [TARGET]].corr(numeric_only=True)[TARGET]
+    corr = df[FEATURES + [TARGET]].corr(
+        numeric_only=True
+    )[TARGET]
+
     corr = corr.drop(TARGET).sort_values()
 
     st.bar_chart(corr)
@@ -920,6 +992,7 @@ def model_page(mae, r2, accuracy):
     )
 
     st.subheader("Model architecture")
+
     st.markdown("""
     <div class="panel">
       <b>1. Input data</b><br>
@@ -927,8 +1000,8 @@ def model_page(mae, r2, accuracy):
       participation and sleep hours.
       <br><br>
       <b>2. Data preparation</b><br>
-      Load the CSV, convert the required columns to numeric values,
-      and remove rows with missing required values.
+      Load the CSV, convert required columns to numeric values,
+      and use median imputation for missing feature values.
       <br><br>
       <b>3. Machine-learning models</b><br>
       Random Forest Regression estimates final score. If the dataset
@@ -942,13 +1015,22 @@ def model_page(mae, r2, accuracy):
 
     st.write("")
     st.subheader("Evaluation")
+
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        metric_card("MAE", f"{mae:.2f}", "Average absolute error on test split")
+        metric_card(
+            "MAE",
+            f"{mae:.2f}",
+            "Average absolute error on test split",
+        )
 
     with c2:
-        metric_card("R²", f"{r2:.3f}", "Regression test-set metric")
+        metric_card(
+            "R²",
+            f"{r2:.3f}",
+            "Regression test-set metric",
+        )
 
     with c3:
         metric_card(
@@ -961,6 +1043,7 @@ def model_page(mae, r2, accuracy):
 
     st.write("")
     st.subheader("Important limitations")
+
     st.markdown("""
     - The project uses a sample dataset and its patterns may not represent real students.
     - Model metrics depend on the data and the random train/test split.
@@ -981,10 +1064,11 @@ if not st.session_state.logged_in:
         login_page()
     else:
         home_page()
+
     st.stop()
 
 
-# Load data only after the user has signed in.
+# Load data after sign-in.
 try:
     data = load_data()
 except Exception as exc:
@@ -999,13 +1083,32 @@ if data is None or data.empty:
     st.stop()
 
 if len(data) < 5:
-    st.error("The dataset needs at least 5 usable rows to train the model.")
+    st.error(
+        "The dataset needs at least 5 usable rows to evaluate the model."
+    )
+    st.stop()
+
+if not MODEL_PATH.exists():
+    st.error(
+        "Saved model not found. Open the VS Code terminal and run "
+        "`python train.py`, then refresh this app."
+    )
     st.stop()
 
 try:
-    regressor, classifier, model_mae, model_r2, model_accuracy = train_models(data)
+    # Pass model modification time to refresh the cache after retraining.
+    model_version = os.path.getmtime(MODEL_PATH)
+
+    (
+        regressor,
+        classifier,
+        model_mae,
+        model_r2,
+        model_accuracy,
+    ) = train_models(data, model_version)
+
 except Exception as exc:
-    st.error(f"Could not train the model: {exc}")
+    st.error(f"Could not load or evaluate the model: {exc}")
     st.stop()
 
 
@@ -1013,7 +1116,7 @@ sidebar()
 page = st.session_state.page
 
 if page == "Overview":
-    overview_page(data, model_mae)
+    overview_page(data, model_mae, model_r2)
 
 elif page == "Predict student":
     predict_page(regressor, classifier)
@@ -1022,7 +1125,11 @@ elif page == "Insights":
     insights_page(data)
 
 elif page == "Model information":
-    model_page(model_mae, model_r2, model_accuracy)
+    model_page(
+        model_mae,
+        model_r2,
+        model_accuracy,
+    )
 
 else:
     go("Overview")
