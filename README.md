@@ -49,13 +49,12 @@ edupredict-ai/
 5. Add tests and a GitHub Actions workflow.
 
 ## GitHub
-Create a new public repository named `edupredict-ai`, then:
+
+Repository: https://github.com/Shriraksha-afk/edupredict-ai
+
+To update the project:
 
 ```bash
-git init
-git add .
-git commit -m "Build EduPredict AI student performance predictor"
-git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/edupredict-ai.git
-git push -u origin main
-```
+git add app.py train.py README.md
+git commit -m "Update EduPredict AI project"
+git push origin main
