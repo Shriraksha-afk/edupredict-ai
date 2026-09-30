@@ -10,6 +10,7 @@ An end-to-end machine-learning portfolio project that estimates a student's fina
 - Random Forest regression pipeline
 - Holdout evaluation using MAE, RMSE and R²
 - Interactive Streamlit prediction interface
+- User registration and login
 
 ## Important Limitation
 
@@ -27,7 +28,11 @@ The Random Forest regression model is evaluated using a holdout test split.
 | RMSE | Root Mean Squared Error |
 | R² | Coefficient of Determination |
 
-Evaluation results should be added here after running `train.py`.
+Latest evaluation results:
+- MAE: 6.17
+- R²: 0.592
+
+These metrics describe performance on the project's test split and synthetic dataset. They do not establish real-world predictive validity.
 
 ## Setup
 
@@ -55,13 +60,61 @@ edupredict-ai/
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
+├── screenshots/
+│   ├── homepage.png
+│   ├── createaccount.png
+│   ├── signup.png
+│   ├── after-creating-account.png
+│   ├── overview.png
+│   ├── workspace.png
+│   ├── result.png
+│   ├── insight.png
+│   └── model-info.png
 ├── data/
 │   └── student_performance.csv
 └── models/
     └── student_model.joblib
 ```
 
-The dataset and trained model are generated locally and may be excluded from GitHub.
+The dataset and trained model are generated locally and may be excluded from GitHub. The screenshots are included to demonstrate the app interface.
+
+## Screenshots
+
+### 1. Homepage
+
+![EduPredict AI Homepage](screenshots/homepage.png)
+
+### 2. Create Account
+
+![Create Account](screenshots/createaccount.png)
+
+### 3. Signup
+
+![Signup Page](screenshots/signup.png)
+
+### 4. Account Created
+
+![Account Created](screenshots/after-creating-account.png)
+
+### 5. Overview Dashboard
+
+![EduPredict AI Overview](screenshots/overview.png)
+
+### 6. Student Workspace
+
+![Student Workspace](screenshots/workspace.png)
+
+### 7. Student Prediction
+
+![Student Prediction Result](screenshots/result.png)
+
+### 8. Insights
+
+![Student Performance Insights](screenshots/insight.png)
+
+### 9. Model Information
+
+![Model Evaluation](screenshots/model-info.png)
 
 ## Next Improvements
 
@@ -73,12 +126,12 @@ The dataset and trained model are generated locally and may be excluded from Git
 
 ## GitHub
 
-Repository: [EduPredict AI](https://github.com/Shriraksha-afk/edupredict-ai)
+Repository: https://github.com/Shriraksha-afk/edupredict-ai
 
 To upload updates to the existing repository:
 
 ```bash
-git add app.py train.py README.md
-git commit -m "Update EduPredict AI project"
+git add app.py train.py README.md screenshots/
+git commit -m "Update EduPredict AI README and screenshots"
 git push origin main
 ```
